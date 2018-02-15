@@ -19,6 +19,7 @@
 /xtrabackup
 /mongo
 /google
+/cassandra
 /mock
 /consul-snapshot
 .DS_Store
