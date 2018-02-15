@@ -64,10 +64,10 @@
 // RESTORE DETAILS
 //
 // To restore, the `xtrabackup` plugin moves back the backed up data files to
-// the MySQL data directory. Before the restore operation, MySQL must be stopped and 
-// the MySQL data directory needs to be empty. 
+// the MySQL data directory. Before the restore operation, MySQL must be stopped and
+// the MySQL data directory needs to be empty.
 //
-// To complete the restore of a Galera cluster, all nodes must be stopped. The previously restored node must 
+// To complete the restore of a Galera cluster, all nodes must be stopped. The previously restored node must
 // be rebooted in bootstrap mode. The other nodes will be added to the second time to the cluster..
 //
 // DEPENDENCIES
@@ -244,11 +244,11 @@ func (p XtraBackupPlugin) Backup(endpoint ShieldEndpoint) error {
 			err = os.Remove(targetDir)
 		}
 		if err != nil {
-			ansi.Fprintf(os.Stderr,"@R{\u2717 Check existing temporary target directory} %s \n",xtrabackup.TargetDir)
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Check existing temporary target directory} %s \n", xtrabackup.TargetDir)
 			return err
 		}
 	}
-	ansi.Fprintf(os.Stderr,"@G{\u2713 Check existing temporary target directory} %s \n",xtrabackup.TargetDir)
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Check existing temporary target directory} %s \n", xtrabackup.TargetDir)
 	defer func() {
 		os.RemoveAll(targetDir)
 	}()
@@ -267,18 +267,18 @@ func (p XtraBackupPlugin) Backup(endpoint ShieldEndpoint) error {
 
 	DEBUG("Executing: `%s`", cmdString)
 	if err = ExecWithOptions(opts); err != nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 Creating backup files failed}\n")
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Creating backup files failed}\n")
 		return err
 	}
-	ansi.Fprintf(os.Stderr,"@G{\u2713 Created backup files}\n")
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Created backup files}\n")
 
 	// create and return archive
 	cmdString = fmt.Sprintf("%s -cf - -C %s .", xtrabackup.Tar, targetDir)
 	if err = Exec(cmdString, STDOUT); err != nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 Creating archive failed}\n")
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Creating archive failed}\n")
 		return err
 	}
-	ansi.Fprintf(os.Stderr,"@G{\u2713 Created archive}\n")
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Created archive}\n")
 	// remove temporary target directory
 	return os.RemoveAll(targetDir)
 }
@@ -290,56 +290,56 @@ func (p XtraBackupPlugin) Restore(endpoint ShieldEndpoint) error {
 	}
 	// mysql must be stopped
 	cmdString := "bash -c \" ps -efw | grep -F mysqld | grep -vE 'grep|mysqld_' &> /dev/null \""
-	if err =  Exec(cmdString, STDOUT); err == nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 MySQL must be stopped} Stop it and restart restore\n")
+	if err = Exec(cmdString, STDOUT); err == nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 MySQL must be stopped} Stop it and restart restore\n")
 		return err
-        }
-	ansi.Fprintf(os.Stderr,"@G{\u2713 MySQL is stopped}\n")
-	// targetdir must not exist
-        backupDir := xtrabackup.TargetDir
-        if fi, err := os.Lstat(backupDir); err == nil {
-                if fi.IsDir() {
-                        err = os.RemoveAll(backupDir)
-                } else {
-                        err = os.Remove(backupDir)
-                }
-                if err != nil {
-                        ansi.Fprintf(os.Stderr,"@R{\u2717 Checking existing temporary backup directory failed} %s \n",backupDir)
-                        return err
-                }
-        }
-	ansi.Fprintf(os.Stderr,"@G{\u2713 Checked temporary backup directory} %s \n",backupDir)
-	defer func() {
-                os.RemoveAll(backupDir)
-        }()
-
-        // datadir exist
-        dataDir := xtrabackup.DataDir
-        fi, err := os.Lstat(dataDir)
-	if err != nil  {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 mysql_datadir not exist} %s \n",dataDir)
-                return err
 	}
-        if ! fi.IsDir() {
-                ansi.Fprintf(os.Stderr,"@R{\u2717 mysql_datadir must be a directory} %s \n",dataDir)
-                return err
-        }
+	ansi.Fprintf(os.Stderr, "@G{\u2713 MySQL is stopped}\n")
+	// targetdir must not exist
+	backupDir := xtrabackup.TargetDir
+	if fi, err := os.Lstat(backupDir); err == nil {
+		if fi.IsDir() {
+			err = os.RemoveAll(backupDir)
+		} else {
+			err = os.Remove(backupDir)
+		}
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Checking existing temporary backup directory failed} %s \n", backupDir)
+			return err
+		}
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Checked temporary backup directory} %s \n", backupDir)
+	defer func() {
+		os.RemoveAll(backupDir)
+	}()
+
+	// datadir exist
+	dataDir := xtrabackup.DataDir
+	fi, err := os.Lstat(dataDir)
+	if err != nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 mysql_datadir not exist} %s \n", dataDir)
+		return err
+	}
+	if !fi.IsDir() {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 mysql_datadir must be a directory} %s \n", dataDir)
+		return err
+	}
 	myuid := fi.Sys().(*syscall.Stat_t).Uid
-        mygid := fi.Sys().(*syscall.Stat_t).Gid
+	mygid := fi.Sys().(*syscall.Stat_t).Gid
 
 	files, err := filepath.Glob(fmt.Sprintf("%s/*", dataDir))
-        if err != nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 unable to read the directory} %s \n",dataDir)
+	if err != nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 unable to read the directory} %s \n", dataDir)
 		return err
-        }
-        for _, f := range files {
-                err = os.RemoveAll(f)
-                if err != nil {
-			ansi.Fprintf(os.Stderr,"@R{\u2717 unable to delete} %s \n",f)
-                        return err
-                }
-        }
-        ansi.Fprintf(os.Stderr,"@G{\u2713 Checked datadir directory} %s \n",dataDir)
+	}
+	for _, f := range files {
+		err = os.RemoveAll(f)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 unable to delete} %s \n", f)
+			return err
+		}
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Checked datadir directory} %s \n", dataDir)
 
 	// create tmp folder
 	cmdString = fmt.Sprintf("mkdir -p %s", backupDir)
@@ -350,19 +350,19 @@ func (p XtraBackupPlugin) Restore(endpoint ShieldEndpoint) error {
 	}
 	DEBUG("Executing: `%s`", cmdString)
 	if err = ExecWithOptions(opts); err != nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 Creating temporary backup directory failed} %s \n",backupDir)
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Creating temporary backup directory failed} %s \n", backupDir)
 		return err
 	}
-	ansi.Fprintf(os.Stderr,"@G{\u2713 Created temporary backup directory} %s \n",backupDir)
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Created temporary backup directory} %s \n", backupDir)
 
 	// unpack archive
 	cmdString = fmt.Sprintf("%s -xf - -C %s", xtrabackup.Tar, backupDir)
 	DEBUG("Executing: `%s`", cmdString)
 	if err = Exec(cmdString, STDIN); err != nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 Unpacking backup file failed} \n")
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Unpacking backup file failed} \n")
 		return err
 	}
-	ansi.Fprintf(os.Stderr,"@G{\u2713 Unpacked backup file} \n")
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Unpacked backup file} \n")
 	cmdString = fmt.Sprintf("%s --prepare --target-dir=%s", xtrabackup.Bin, backupDir)
 	opts = ExecOptions{
 		Cmd:      cmdString,
@@ -371,10 +371,10 @@ func (p XtraBackupPlugin) Restore(endpoint ShieldEndpoint) error {
 	}
 	DEBUG("Executing: `%s`", cmdString)
 	if err = ExecWithOptions(opts); err != nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 The Xtrabackup Prepare operation failed}\n")
+		ansi.Fprintf(os.Stderr, "@R{\u2717 The Xtrabackup Prepare operation failed}\n")
 		return err
 	}
-	ansi.Fprintf(os.Stderr,"@G{\u2713 The Xtrabackup Prepare operation is performed}\n")
+	ansi.Fprintf(os.Stderr, "@G{\u2713 The Xtrabackup Prepare operation is performed}\n")
 
 	cmdString = fmt.Sprintf("%s --move-back --target-dir=%s --datadir=%s", xtrabackup.Bin, backupDir, xtrabackup.DataDir)
 	opts = ExecOptions{
@@ -384,26 +384,26 @@ func (p XtraBackupPlugin) Restore(endpoint ShieldEndpoint) error {
 	}
 	DEBUG("Executing: `%s`", cmdString)
 	if err = ExecWithOptions(opts); err != nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 Restoring MySQL server failed}\n")
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Restoring MySQL server failed}\n")
 		return err
 	}
-	ansi.Fprintf(os.Stderr,"@G{\u2713 Restored MySQL server}\n")
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Restored MySQL server}\n")
 	// change uid and gid of restore file
 	err = filepath.Walk(xtrabackup.DataDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		if e := syscall.Chown(path, int(myuid),int(mygid)); e != nil {
-			return  e
+		if e := syscall.Chown(path, int(myuid), int(mygid)); e != nil {
+			return e
 		}
 		return nil
 	})
 	if err != nil {
-		ansi.Fprintf(os.Stderr,"@R{\u2717 Changing files ownership failed}\n")
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Changing files ownership failed}\n")
 		return err
 	}
 
-	ansi.Fprintf(os.Stderr,"@G{\u2713 Changed files ownership}\n")
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Changed files ownership}\n")
 	// remove temporary target directory
 	return os.RemoveAll(xtrabackup.TargetDir)
 }
