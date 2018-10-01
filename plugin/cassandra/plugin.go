@@ -494,18 +494,10 @@ func (p CassandraPlugin) Restore(endpoint plugin.ShieldEndpoint) error {
 		return err
 	}
 
-	plugin.DEBUG("Creating directory '%s' with 0755 permissions", "/var/vcap/store/shield/cassandra")
-	err = os.MkdirAll("/var/vcap/store/shield/cassandra", 0755)
-	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Create base temporary directory}\n")
-		return err
-	}
-	ansi.Fprintf(os.Stderr, "@G{\u2713 Create base temporary directory}\n")
+	baseDir := "/var/vcap/store/shield/cassandra"
 
-	keyspaceDirPath := filepath.Join("/var/vcap/store/shield/cassandra", cassandra.Keyspace)
-
-	// Recursively remove /var/vcap/store/shield/cassandra/{cassandra.Keyspace}, if any
-	cmd := fmt.Sprintf("rm -rf \"%s\"", keyspaceDirPath)
+	// Recursively remove /var/vcap/store/shield/cassandra, if any
+	cmd := fmt.Sprintf("rm -rf \"%s\"", baseDir)
 	plugin.DEBUG("Executing `%s`", cmd)
 	err = plugin.Exec(cmd, plugin.STDOUT)
 	if err != nil {
@@ -514,11 +506,17 @@ func (p CassandraPlugin) Restore(endpoint plugin.ShieldEndpoint) error {
 	}
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Clear base temporary directory}\n")
 
-	defer func() {
-		// plugin.DEBUG("Skipping recursive deletion of directory '%s'", keyspaceDirPath)
+	plugin.DEBUG("Creating directory '%s' with 0755 permissions", baseDir)
+	err = os.MkdirAll(baseDir, 0755)
+	if err != nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Create base temporary directory}\n")
+		return err
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Create base temporary directory}\n")
 
+	defer func() {
 		// Recursively remove /var/vcap/store/shield/cassandra/{cassandra.Keyspace}, if any
-		cmd := fmt.Sprintf("rm -rf \"%s\"", keyspaceDirPath)
+		cmd := fmt.Sprintf("rm -rf \"%s\"", baseDir)
 		plugin.DEBUG("Executing `%s`", cmd)
 		err := plugin.Exec(cmd, plugin.STDOUT)
 		if err != nil {
@@ -528,7 +526,7 @@ func (p CassandraPlugin) Restore(endpoint plugin.ShieldEndpoint) error {
 		ansi.Fprintf(os.Stderr, "@G{\u2713 Clean base temporary directory}\n")
 	}()
 
-	cmd = fmt.Sprintf("%s -x -C /var/vcap/store/shield/cassandra -f -", cassandra.Tar)
+	cmd = fmt.Sprintf("%s -x -C %s -f -", cassandra.Tar, baseDir)
 	plugin.DEBUG("Executing `%s`", cmd)
 	err = plugin.Exec(cmd, plugin.STDIN)
 	if err != nil {
@@ -537,17 +535,53 @@ func (p CassandraPlugin) Restore(endpoint plugin.ShieldEndpoint) error {
 	}
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Extract tar to temporary directory}\n")
 
+	if cassandra.Keyspace != "" {
+		keyspaceDirPath := filepath.Join(baseDir, cassandra.Keyspace)
+		err = restoreKeyspace(cassandra, keyspaceDirPath)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Load all tables data}\n")
+			return err
+		}
+	} else {
+		dir, err := os.Open(baseDir)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Load all tables data}\n")
+			return err
+		}
+		defer dir.Close()
+
+		entries, err := dir.Readdir(-1)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Load all tables data}\n")
+			return err
+		}
+		for _, keyspaceDirInfo := range entries {
+			if !keyspaceDirInfo.IsDir() {
+				continue
+			}
+			keyspaceDirPath := filepath.Join(baseDir, keyspaceDirInfo.Name())
+			err = restoreKeyspace(cassandra, keyspaceDirPath)
+			if err != nil {
+				ansi.Fprintf(os.Stderr, "@R{\u2717 Load all tables data}\n")
+				return err
+			}
+		}
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Load all tables data}\n")
+
+	return nil
+}
+
+func restoreKeyspace(cassandra *CassandraInfo, keyspaceDirPath string) error {
 	// Iterate through all table directories /var/vcap/store/shield/cassandra/{cassandra.Keyspace}/{tablename}
 	dir, err := os.Open(keyspaceDirPath)
 	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Load all tables data}\n")
 		return err
 	}
 	defer dir.Close()
 
 	entries, err := dir.Readdir(-1)
 	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Load all tables data}\n")
 		return err
 	}
 	for _, tableDirInfo := range entries {
@@ -560,12 +594,9 @@ func (p CassandraPlugin) Restore(endpoint plugin.ShieldEndpoint) error {
 		plugin.DEBUG("Executing: `%s`", cmd)
 		err = plugin.Exec(cmd, plugin.STDIN)
 		if err != nil {
-			ansi.Fprintf(os.Stderr, "@R{\u2717 Load all tables data}\n")
 			return err
 		}
 	}
-	ansi.Fprintf(os.Stderr, "@G{\u2713 Load all tables data}\n")
-
 	return nil
 }
 
