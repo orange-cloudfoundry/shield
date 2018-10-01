@@ -20,7 +20,7 @@
 //        "cassandra_port"         : "9042",             # native transport port
 //        "cassandra_user"         : "username",
 //        "cassandra_password"     : "password",
-//        "cassandra_keyspace"     : "ksXXXX",           # Required
+//        "cassandra_keyspace"     : "ksXXXX",           # optional
 //        "cassandra_bindir"       : "/path/to/bindir",
 //        "cassandra_datadir"      : "/path/to/datadir",
 //        "cassandra_tar"          : "/path/to/tar"      # where is the tar utility?
@@ -42,11 +42,19 @@
 //
 // BACKUP DETAILS
 //
-// Backup is limited to one single keyspace, and is made against one single
-// node. To completely backup the given keyspace, the backup operation needs
-// to be performed on all cluster nodes.
+// When no keyspace is specified, then all keyspaces are backed up on a
+// specific node. To completely backup the Cassandra cluster, the backup
+// operation needs to be performed on all cluster nodes.
+//
+// Otherwise, backup is limited to one single keyspace, and is made against
+// one single node. To completely backup the given keyspace, the backup
+// operation needs to be performed on all cluster nodes.
 //
 // RESTORE DETAILS
+//
+// When no keyspace is specified, then all keyspaces are restored on a
+// specific node. To completely restore the Cassandra cluster, the restore
+// operation needs to be performed on all cluster nodes.
 //
 // Restore is limited to the single keyspace specified in the plugin config.
 // When restoring, this keyspace config must be the same as the keyspace
@@ -193,10 +201,12 @@ func (p CassandraPlugin) Validate(endpoint plugin.ShieldEndpoint) error {
 		ansi.Printf("@G{\u2713 cassandra_password}      @C{%s}\n", s)
 	}
 
-	s, err = endpoint.StringValue("cassandra_keyspace")
+	s, err = endpoint.StringValueDefault("cassandra_keyspace", "")
 	if err != nil {
 		ansi.Printf("@R{\u2717 cassandra_keyspace      %s}\n", err)
 		fail = true
+	} else if s == "" {
+		ansi.Printf("@G{\u2713 cassandra_keyspace}      backing up *all* keyspaces\n")
 	} else {
 		ansi.Printf("@G{\u2713 cassandra_keyspace}      @C{%s}\n", s)
 	}
@@ -267,7 +277,12 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	}()
 
 	plugin.DEBUG("Creating a new '%s' snapshot", SnapshotName)
-	cmd = fmt.Sprintf("%s/nodetool snapshot -t %s \"%s\"", cassandra.BinDir, SnapshotName, cassandra.Keyspace)
+	if cassandra.Keyspace == "" {
+		cmd = fmt.Sprintf("%s/nodetool snapshot -t %s", cassandra.BinDir, SnapshotName)
+	} else {
+		cmd = fmt.Sprintf("%s/nodetool snapshot -t %s \"%s\"", cassandra.BinDir, SnapshotName, cassandra.Keyspace)
+	}
+
 	plugin.DEBUG("Executing: `%s`", cmd)
 	err = plugin.Exec(cmd, plugin.STDIN)
 	if err != nil {
@@ -282,18 +297,10 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	// that to stdout.
 
 	baseDir := "/var/vcap/store/shield/cassandra"
-	plugin.DEBUG("Creating any missing directories for '%s', with 0755 permissions", baseDir)
-	err = os.MkdirAll(baseDir, 0755)
-	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Create base temporary directory}\n")
-		return err
-	}
-	ansi.Fprintf(os.Stderr, "@G{\u2713 Create base temporary directory}\n")
 
-	// Recursively remove /var/vcap/store/shield/cassandra/{keyspace}, if any
-	tmpKeyspaceDir := filepath.Join(baseDir, cassandra.Keyspace)
-	plugin.DEBUG("Removing any stale '%s' directory", tmpKeyspaceDir)
-	cmd = fmt.Sprintf("rm -rf \"%s\"", tmpKeyspaceDir)
+	// Recursively remove /var/vcap/store/shield/cassandra, if any
+	plugin.DEBUG("Removing any stale '%s' directory", baseDir)
+	cmd = fmt.Sprintf("rm -rf \"%s\"", baseDir)
 	plugin.DEBUG("Executing `%s`", cmd)
 	err = plugin.Exec(cmd, plugin.STDOUT)
 	if err != nil {
@@ -302,10 +309,18 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	}
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Clear base temporary directory}\n")
 
+	plugin.DEBUG("Creating base directories for '%s', with 0755 permissions", baseDir)
+	err = os.MkdirAll(baseDir, 0755)
+	if err != nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Create base temporary directory}\n")
+		return err
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Create base temporary directory}\n")
+
 	defer func() {
-		// Recursively remove /var/vcap/store/shield/cassandra/{keyspace}, if any
-		plugin.DEBUG("Cleaning the '%s' directory up", tmpKeyspaceDir)
-		cmd := fmt.Sprintf("rm -rf \"%s\"", tmpKeyspaceDir)
+		// Recursively remove /var/vcap/store/shield/cassandra directory
+		plugin.DEBUG("Cleaning the '%s' directory up", baseDir)
+		cmd := fmt.Sprintf("rm -rf \"%s\"", baseDir)
 		plugin.DEBUG("Executing `%s`", cmd)
 		err := plugin.Exec(cmd, plugin.STDOUT)
 		if err != nil {
@@ -315,13 +330,17 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 		ansi.Fprintf(os.Stderr, "@G{\u2713 Clean base temporary directory}\n")
 	}()
 
-	plugin.DEBUG("Creating directory '%s' with 0700 permissions", tmpKeyspaceDir)
-	err = os.Mkdir(tmpKeyspaceDir, 0700)
-	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Create temporary directory}\n")
-		return err
+	tmpKeyspaceDir := filepath.Join(baseDir, cassandra.Keyspace)
+	if cassandra.Keyspace != "" {
+
+		plugin.DEBUG("Creating directory '%s' with 0700 permissions", tmpKeyspaceDir)
+		err = os.Mkdir(tmpKeyspaceDir, 0700)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Create temporary directory}\n")
+			return err
+		}
+		ansi.Fprintf(os.Stderr, "@G{\u2713 Create temporary directory}\n")
 	}
-	ansi.Fprintf(os.Stderr, "@G{\u2713 Create temporary directory}\n")
 
 	// Iterate through {dataDir}/{keyspace}/{tablename}/snapshots/shield-backup/*
 	// and for all the immutable files we find here, we hard-link them
@@ -342,6 +361,39 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	}
 
 	srcKeyspaceDir := filepath.Join(cassandra.DataDir, cassandra.Keyspace)
+
+
+
+
+
+
+
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Recursive hard-link snapshot files in temp dir}\n")
+
+	plugin.DEBUG("Setting ownership of all backup files to '%s'", VcapOwnership)
+	cmd = fmt.Sprintf("chown -R vcap:vcap \"%s\"", tmpKeyspaceDir)
+	plugin.DEBUG("Executing `%s`", cmd)
+	err = plugin.Exec(cmd, plugin.STDOUT)
+	if err != nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Set ownership of snapshot hard-links}\n")
+		return err
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Set ownership of snapshot hard-links}\n")
+
+	plugin.DEBUG("Streaming output tar file")
+	cmd = fmt.Sprintf("%s -c -C /var/vcap/store/shield/cassandra -f - \"%s\"", cassandra.Tar, cassandra.Keyspace)
+	plugin.DEBUG("Executing `%s`", cmd)
+	err = plugin.Exec(cmd, plugin.STDOUT)
+	if err != nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Stream tar of snapshots files}\n")
+		return err
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Stream tar of snapshots files}\n")
+
+	return nil
+}
+
+func hardLinkKeyspace(srcKeyspaceDir string, tmpKeyspaceDir string) {
 	dir, err := os.Open(srcKeyspaceDir)
 	if err != nil {
 		ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files}\n")
@@ -381,29 +433,6 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 			return err
 		}
 	}
-	ansi.Fprintf(os.Stderr, "@G{\u2713 Recursive hard-link snapshot files in temp dir}\n")
-
-	plugin.DEBUG("Setting ownership of all backup files to '%s'", VcapOwnership)
-	cmd = fmt.Sprintf("chown -R vcap:vcap \"%s\"", tmpKeyspaceDir)
-	plugin.DEBUG("Executing `%s`", cmd)
-	err = plugin.Exec(cmd, plugin.STDOUT)
-	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Set ownership of snapshot hard-links}\n")
-		return err
-	}
-	ansi.Fprintf(os.Stderr, "@G{\u2713 Set ownership of snapshot hard-links}\n")
-
-	plugin.DEBUG("Streaming output tar file")
-	cmd = fmt.Sprintf("%s -c -C /var/vcap/store/shield/cassandra -f - \"%s\"", cassandra.Tar, cassandra.Keyspace)
-	plugin.DEBUG("Executing `%s`", cmd)
-	err = plugin.Exec(cmd, plugin.STDOUT)
-	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Stream tar of snapshots files}\n")
-		return err
-	}
-	ansi.Fprintf(os.Stderr, "@G{\u2713 Stream tar of snapshots files}\n")
-
-	return nil
 }
 
 // Hard-link all files from 'src_dir' to the 'dst_dir'
