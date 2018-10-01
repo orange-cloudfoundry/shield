@@ -381,7 +381,7 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Recursive hard-link snapshot files in temp dir}\n")
 
 	plugin.DEBUG("Setting ownership of all backup files to '%s'", VcapOwnership)
-	cmd = fmt.Sprintf("chown -R vcap:vcap \"%s\"", cassandra.DataDir)
+	cmd = fmt.Sprintf("chown -R vcap:vcap \"%s\"", baseDir)
 	plugin.DEBUG("Executing `%s`", cmd)
 	err = plugin.Exec(cmd, plugin.STDOUT)
 	if err != nil {
@@ -391,7 +391,7 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Set ownership of snapshot hard-links}\n")
 
 	plugin.DEBUG("Streaming output tar file")
-	cmd = fmt.Sprintf("%s -c -C /var/vcap/store/shield/cassandra -f - \"%s\"", cassandra.Tar, cassandra.Keyspace)
+	cmd = fmt.Sprintf("%s -c -C %s -f - .", cassandra.Tar, baseDir)
 	plugin.DEBUG("Executing `%s`", cmd)
 	err = plugin.Exec(cmd, plugin.STDOUT)
 	if err != nil {
