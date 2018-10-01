@@ -330,18 +330,6 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 		ansi.Fprintf(os.Stderr, "@G{\u2713 Clean base temporary directory}\n")
 	}()
 
-	tmpKeyspaceDir := filepath.Join(baseDir, cassandra.Keyspace)
-	if cassandra.Keyspace != "" {
-
-		plugin.DEBUG("Creating directory '%s' with 0700 permissions", tmpKeyspaceDir)
-		err = os.Mkdir(tmpKeyspaceDir, 0700)
-		if err != nil {
-			ansi.Fprintf(os.Stderr, "@R{\u2717 Create temporary directory}\n")
-			return err
-		}
-		ansi.Fprintf(os.Stderr, "@G{\u2713 Create temporary directory}\n")
-	}
-
 	// Iterate through {dataDir}/{keyspace}/{tablename}/snapshots/shield-backup/*
 	// and for all the immutable files we find here, we hard-link them
 	// to /var/vcap/store/shield/cassandra/{keyspace}/{tablename}
@@ -352,26 +340,48 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 
 	info, err := os.Lstat(cassandra.DataDir)
 	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files}\n")
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files in temp dir}\n")
 		return err
 	}
 	if !info.IsDir() {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files}\n")
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files in temp dir}\n")
 		return fmt.Errorf("cassandra DataDir is not a directory")
 	}
 
-	srcKeyspaceDir := filepath.Join(cassandra.DataDir, cassandra.Keyspace)
+	if cassandra.Keyspace != "" {
+		err = hardLinkKeyspace(cassandra.DataDir, baseDir, cassandra.Keyspace)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files in temp dir}\n")
+			return err
+		}
+	} else {
+		dir, err := os.Open(cassandra.DataDir)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files in temp dir}\n")
+			return err
+		}
+		defer dir.Close()
 
-
-
-
-
-
-
+		entries, err := dir.Readdir(-1)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files in temp dir}\n")
+			return err
+		}
+		for _, keyspaceDirInfo := range entries {
+			if !keyspaceDirInfo.IsDir() {
+				continue
+			}
+			err = hardLinkKeyspace(cassandra.DataDir, baseDir, keyspaceDirInfo.Name())
+			if err != nil {
+				ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files in temp dir}\n")
+				return err
+			}
+		}
+	}
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Recursive hard-link snapshot files in temp dir}\n")
 
 	plugin.DEBUG("Setting ownership of all backup files to '%s'", VcapOwnership)
-	cmd = fmt.Sprintf("chown -R vcap:vcap \"%s\"", tmpKeyspaceDir)
+	cmd = fmt.Sprintf("chown -R vcap:vcap \"%s\"", cassandra.DataDir)
 	plugin.DEBUG("Executing `%s`", cmd)
 	err = plugin.Exec(cmd, plugin.STDOUT)
 	if err != nil {
@@ -393,17 +403,23 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	return nil
 }
 
-func hardLinkKeyspace(srcKeyspaceDir string, tmpKeyspaceDir string) {
+func hardLinkKeyspace(srcDataDir string, dstBaseDir string, keyspace string) error {
+	tmpKeyspaceDir := filepath.Join(dstBaseDir, keyspace)
+	plugin.DEBUG("Creating destination keyspace directory '%s' with 0700 permissions", tmpKeyspaceDir)
+	err := os.Mkdir(tmpKeyspaceDir, 0700)
+	if err != nil {
+		return err
+	}
+
+	srcKeyspaceDir := filepath.Join(srcDataDir, keyspace)
 	dir, err := os.Open(srcKeyspaceDir)
 	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files}\n")
 		return err
 	}
 	defer dir.Close()
 
 	entries, err := dir.Readdir(-1)
 	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files}\n")
 		return err
 	}
 	for _, tableDirInfo := range entries {
@@ -412,6 +428,12 @@ func hardLinkKeyspace(srcKeyspaceDir string, tmpKeyspaceDir string) {
 		}
 
 		src_dir := filepath.Join(srcKeyspaceDir, tableDirInfo.Name(), "snapshots", SnapshotName)
+		_, err = os.Lstat(src_dir)
+		if os.IsNotExist(err) {
+			continue
+		} else if err != nil {
+			return err
+		}
 
 		tableName := tableDirInfo.Name()
 		if idx := strings.LastIndex(tableName, "-"); idx >= 0 {
@@ -419,20 +441,19 @@ func hardLinkKeyspace(srcKeyspaceDir string, tmpKeyspaceDir string) {
 		}
 
 		dst_dir := filepath.Join(tmpKeyspaceDir, tableName)
-		plugin.DEBUG("Creating destination directory '%s'", dst_dir)
+		plugin.DEBUG("Creating destination table directory '%s'", dst_dir)
 		err = os.MkdirAll(dst_dir, 0755)
 		if err != nil {
-			ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files}\n")
 			return err
 		}
 
 		plugin.DEBUG("Hard-linking all '%s/*' files to '%s/'", src_dir, dst_dir)
 		err = hardLinkAll(src_dir, dst_dir)
 		if err != nil {
-			ansi.Fprintf(os.Stderr, "@R{\u2717 Recursive hard-link snapshot files in temp dir}\n")
 			return err
 		}
 	}
+	return nil
 }
 
 // Hard-link all files from 'src_dir' to the 'dst_dir'
