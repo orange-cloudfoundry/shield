@@ -12,6 +12,7 @@ import (
 	"reflect"
 )
 
+// ShieldEndpoint ...
 type ShieldEndpoint map[string]interface{}
 
 func getEndpoint(j string) (ShieldEndpoint, error) {
@@ -27,6 +28,7 @@ func getEndpoint(j string) (ShieldEndpoint, error) {
 	return endpoint, nil
 }
 
+// StringValue ...
 func (endpoint ShieldEndpoint) StringValue(key string) (string, error) {
 	_, ok := endpoint[key]
 	if !ok {
@@ -40,6 +42,7 @@ func (endpoint ShieldEndpoint) StringValue(key string) (string, error) {
 	return endpoint[key].(string), nil
 }
 
+// StringValueDefault ...
 func (endpoint ShieldEndpoint) StringValueDefault(key string, def string) (string, error) {
 	s, err := endpoint.StringValue(key)
 	if err == nil {
@@ -51,6 +54,7 @@ func (endpoint ShieldEndpoint) StringValueDefault(key string, def string) (strin
 	return "", err
 }
 
+// FloatValue ...
 func (endpoint ShieldEndpoint) FloatValue(key string) (float64, error) {
 	_, ok := endpoint[key]
 	if !ok {
@@ -64,6 +68,7 @@ func (endpoint ShieldEndpoint) FloatValue(key string) (float64, error) {
 	return endpoint[key].(float64), nil
 }
 
+// FloatValueDefault ...
 func (endpoint ShieldEndpoint) FloatValueDefault(key string, def float64) (float64, error) {
 	f, err := endpoint.FloatValue(key)
 	if err == nil {
@@ -75,6 +80,7 @@ func (endpoint ShieldEndpoint) FloatValueDefault(key string, def float64) (float
 	return 0.0, err
 }
 
+// BooleanValue ...
 func (endpoint ShieldEndpoint) BooleanValue(key string) (bool, error) {
 	_, ok := endpoint[key]
 	if !ok {
@@ -88,6 +94,7 @@ func (endpoint ShieldEndpoint) BooleanValue(key string) (bool, error) {
 	return endpoint[key].(bool), nil
 }
 
+// BooleanValueDefault ...
 func (endpoint ShieldEndpoint) BooleanValueDefault(key string, def bool) (bool, error) {
 	tf, err := endpoint.BooleanValue(key)
 	if err == nil {
@@ -99,6 +106,7 @@ func (endpoint ShieldEndpoint) BooleanValueDefault(key string, def bool) (bool, 
 	return false, err
 }
 
+// ArrayValue ...
 func (endpoint ShieldEndpoint) ArrayValue(key string) ([]interface{}, error) {
 	_, ok := endpoint[key]
 	if !ok {
@@ -112,10 +120,15 @@ func (endpoint ShieldEndpoint) ArrayValue(key string) ([]interface{}, error) {
 	return endpoint[key].([]interface{}), nil
 }
 
+// ArrayValueDefault ...
 func (endpoint ShieldEndpoint) ArrayValueDefault(key string, def []string) ([]string, error) {
 	a, err := endpoint.ArrayValue(key)
 	if err == nil {
-		return a.([]string), nil
+		coerced := []string{}
+		for _, elem := range a {
+			coerced = append(coerced, elem.(string))
+		}
+		return coerced, nil
 	}
 	if _, ok := err.(EndpointMissingRequiredDataError); ok {
 		return def, nil
@@ -123,6 +136,7 @@ func (endpoint ShieldEndpoint) ArrayValueDefault(key string, def []string) ([]st
 	return []string{}, err
 }
 
+// MapValue ...
 func (endpoint ShieldEndpoint) MapValue(key string) (map[string]interface{}, error) {
 	_, ok := endpoint[key]
 	if !ok {
