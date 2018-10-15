@@ -91,17 +91,21 @@ import (
 
 // Default configuration values for the plugin
 const (
-	DefaultHost             = "127.0.0.1"
-	DefaultPort             = "9042"
-	DefaultUser             = "cassandra"
-	DefaultPassword         = "cassandra"
-	DefaultExcludeKeyspaces = []string{"system_schema", "system_distributed", "system_auth", "system", "system_traces"}
-	DefaultBinDir           = "/var/vcap/jobs/cassandra/bin"
-	DefaultDataDir          = "/var/vcap/store/cassandra/data"
-	DefaultTar              = "tar"
+	DefaultHost     = "127.0.0.1"
+	DefaultPort     = "9042"
+	DefaultUser     = "cassandra"
+	DefaultPassword = "cassandra"
+	DefaultBinDir   = "/var/vcap/jobs/cassandra/bin"
+	DefaultDataDir  = "/var/vcap/store/cassandra/data"
+	DefaultTar      = "tar"
 
 	VcapOwnership = "vcap:vcap"
 	SnapshotName  = "shield-backup"
+)
+
+// Array or slices aren't immutable by nature; you can't make them constant
+var (
+	DefaultExcludeKeyspaces = []string{"system_schema", "system_distributed", "system_auth", "system", "system_traces"}
 )
 
 func main() {
@@ -269,6 +273,26 @@ func (p CassandraPlugin) Validate(endpoint plugin.ShieldEndpoint) error {
 	return nil
 }
 
+func computeSavedKeyspaces(includeKeyspaces, excludeKeyspaces []string) []string {
+	if includeKeyspaces == nil {
+		return nil
+	}
+
+	savedKeyspaces := []string{}
+
+	sort.Strings(excludeKeyspaces)
+	for _, keyspace := range includeKeyspaces {
+		idx := sort.SearchStrings(excludeKeyspaces, keyspace)
+		if idx < len(excludeKeyspaces) && excludeKeyspaces[idx] == keyspace {
+			continue
+		}
+		savedKeyspaces = append(savedKeyspaces, keyspace)
+	}
+	sort.Strings(savedKeyspaces)
+
+	return savedKeyspaces
+}
+
 // Backup one cassandra keyspace
 func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	cassandra, err := cassandraInfo(endpoint)
@@ -298,19 +322,7 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 		ansi.Fprintf(os.Stderr, "@G{\u2713 Clear snapshot}\n")
 	}()
 
-	var savedKeyspaces []string
-	if cassandra.IncludeKeyspaces != nil {
-		sort.Strings(cassandra.ExcludeKeyspaces)
-		savedKeyspaces = []string{}
-		for _, keyspace := range cassandra.IncludeKeyspaces {
-			idx := sort.SearchStrings(cassandra.ExcludeKeyspaces, keyspace)
-			if idx < len(cassandra.ExcludeKeyspaces) && cassandra.ExcludeKeyspaces[idx] == keyspace {
-				continue
-			}
-			append(savedKeyspaces, keyspace)
-		}
-	}
-	sort.Strings(savedKeyspaces)
+	savedKeyspaces := computeSavedKeyspaces(cassandra.IncludeKeyspaces, cassandra.ExcludeKeyspaces)
 
 	plugin.DEBUG("Creating a new '%s' snapshot", SnapshotName)
 	cmd = fmt.Sprintf("%s/nodetool snapshot -t %s", cassandra.BinDir, SnapshotName)
@@ -568,6 +580,9 @@ func (p CassandraPlugin) Restore(endpoint plugin.ShieldEndpoint) error {
 		ansi.Fprintf(os.Stderr, "@G{\u2713 Clear base temporary directory}\n")
 	}()
 
+	savedKeyspaces := computeSavedKeyspaces(cassandra.IncludeKeyspaces, cassandra.ExcludeKeyspaces)
+
+	// TODO: here we should extract only the necessary keyspaces
 	cmd = fmt.Sprintf("%s -x -C %s -f -", cassandra.Tar, baseDir)
 	plugin.DEBUG("Executing `%s`", cmd)
 	err = plugin.Exec(cmd, plugin.STDIN)
