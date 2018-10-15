@@ -322,6 +322,7 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 		ansi.Fprintf(os.Stderr, "@G{\u2713 Clear snapshot}\n")
 	}()
 
+	sort.Strings(cassandra.ExcludeKeyspaces)
 	savedKeyspaces := computeSavedKeyspaces(cassandra.IncludeKeyspaces, cassandra.ExcludeKeyspaces)
 
 	plugin.DEBUG("Creating a new '%s' snapshot", SnapshotName)
@@ -580,6 +581,7 @@ func (p CassandraPlugin) Restore(endpoint plugin.ShieldEndpoint) error {
 		ansi.Fprintf(os.Stderr, "@G{\u2713 Clear base temporary directory}\n")
 	}()
 
+	sort.Strings(cassandra.ExcludeKeyspaces)
 	savedKeyspaces := computeSavedKeyspaces(cassandra.IncludeKeyspaces, cassandra.ExcludeKeyspaces)
 
 	// TODO: here we should extract only the necessary keyspaces
