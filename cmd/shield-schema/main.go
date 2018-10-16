@@ -26,7 +26,7 @@ func main() {
 		DSN     string `goptions:"-d,--database, description='DSN of the database backend'"`
 		Version bool   `goptions:"-v, --version, description='Display the SHIELD version'"`
 	}{
-	// No defaults
+		// No defaults
 	}
 	if err := goptions.Parse(&options); err != nil {
 		fmt.Printf("%s\n", err)

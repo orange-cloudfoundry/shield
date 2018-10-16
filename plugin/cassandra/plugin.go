@@ -1,5 +1,5 @@
-// The `cassandra` plugin for SHIELD implements backup + restore of one single
-// keyspace on a Cassandra node.
+// The `cassandra` plugin for SHIELD implements backup + restore of keyspaces
+// on a single Cassandra node.
 //
 // PLUGIN FEATURES
 //
@@ -12,19 +12,19 @@
 // PLUGIN CONFIGURATION
 //
 // The endpoint configuration passed to this plugin is used to identify which
-// cassandra node to back up, and how to connect to it. Your endpoint JSON
+// cassandra node to backup, and how to connect to it. Your endpoint JSON
 // should look something like this:
 //
 //    {
-//        "cassandra_host"         : "10.244.67.61",
-//        "cassandra_port"         : "9042",             # native transport port
-//        "cassandra_user"         : "username",
-//        "cassandra_password"     : "password",
-//        "cassandra_include_keyspaces"     : "ksXXXX",           # optional
-//        "cassandra_exclude_keyspaces"     : "ksXXXX",           # optional
-//        "cassandra_bindir"       : "/path/to/bindir",
-//        "cassandra_datadir"      : "/path/to/datadir",
-//        "cassandra_tar"          : "/path/to/tar"      # where is the tar utility?
+//        "cassandra_host"              : "10.244.67.61",
+//        "cassandra_port"              : "9042",             # native transport port
+//        "cassandra_user"              : "username",
+//        "cassandra_password"          : "password",
+//        "cassandra_include_keyspaces" : [ "ksXXXX" ],       # optional
+//        "cassandra_exclude_keyspaces" : [ "ksXXXX" ],       # optional
+//        "cassandra_bindir"            : "/path/to/bindir",
+//        "cassandra_datadir"           : "/path/to/datadir",
+//        "cassandra_tar"               : "/path/to/tar"      # where is the tar utility?
 //    }
 //
 // The plugin provides devault values for those configuration properties, as
@@ -32,48 +32,78 @@
 // it.
 //
 //    {
-//        "cassandra_host"     : "127.0.0.1",
-//        "cassandra_port"     : "9042",
-//        "cassandra_user"     : "cassandra",
-//        "cassandra_password" : "cassandra",
-//        "cassandra_include_keyspaces" : "", # Backup all keyspaces
-//        "cassandra_exclude_keyspaces" : "system_schema system_distributed system_auth system system_traces",
-//        "cassandra_bindir"   : "/var/vcap/packages/cassandra/bin",
-//        "cassandra_datadir"  : "/var/vcap/store/cassandra/data",
-//        "cassandra_tar"      : "tar"
+//        "cassandra_host"              : "127.0.0.1",
+//        "cassandra_port"              : "9042",
+//        "cassandra_user"              : "cassandra",
+//        "cassandra_password"          : "cassandra",
+//        "cassandra_include_keyspaces" : null,               # Backup all keyspaces
+//        "cassandra_exclude_keyspaces" : [ "system_schema", "system_distributed", "system_auth", "system", "system_traces" ],
+//        "cassandra_bindir"            : "/var/vcap/packages/cassandra/bin",
+//        "cassandra_datadir"           : "/var/vcap/store/cassandra/data",
+//        "cassandra_tar"               : "tar"
 //    }
 //
 // BACKUP DETAILS
 //
-// When no keyspace is specified, then all keyspaces are backed up on a
-// specific node. To completely backup the Cassandra cluster, the backup
-// operation needs to be performed on all cluster nodes.
+// To completely backup the Cassandra cluster, the backup operation needs to
+// be performed on all cluster nodes. Each cassandra node produces its own
+// archive. For consistency of the backup archives, backup should ideally
+// happen at the same time on all nodes.
 //
-// Otherwise, backup is limited to one single keyspace, and is made against
-// one single node. To completely backup the given keyspace, the backup
-// operation needs to be performed on all cluster nodes.
+// When no `cassandra_include_keyspaces` list is specified, then all keyspaces
+// are backuped on a specific node. Be careful that when the
+// `cassandra_include_keyspaces` list is empty, then no keyspace is backed up.
+//
+// After determining the include list, then the `cassandra_exclude_keyspaces`
+// list is taken into consideration for black-listing keyspaces that must not
+// be backuped. When this list is empty, then no keyspace is excluded. When
+// the list is not defined, then a default exlusion list is used, which
+// excludes these standard system keyspaces: "system", "system_auth",
+// "system_distributed", "system_schema" and "system_traces".
 //
 // RESTORE DETAILS
 //
-// When no keyspace is specified, then all keyspaces are restored on a
-// specific node. To completely restore the Cassandra cluster, the restore
-// operation needs to be performed on all cluster nodes.
+// Keyspaces are restored on a specific node. To completely restore the
+// Cassandra cluster, the restore operation needs to be performed on all
+// cluster nodes. This is because in the general case, keyspaces might have a
+// replication factor that is smaler than the number of nodes.
 //
-// Restore is limited to the single keyspace specified in the plugin config.
-// When restoring, this keyspace config must be the same as the keyspace
-// specified at backup time. Indeed, this plugin doesn't support restoring to
-// a different keyspace.
+// Restored keyspaces are subject to the same inclusion/exclusion rules as at
+// backup time, to decide which keyspaces from the archive are considered.
 //
-// Restore should happen on the same node where the data has been backed up.
-// To completely restore a keyspace, the restore operation should be performed
-// on each node of the cluster, with the data that was backed up on that same
+// The `cassandra_include_keyspaces` list is first taken into consideration.
+// Then, the `cassandra_exclude_keyspaces` list applies, for black-listing
+// keyspaces that must not be restored.
+//
+// Be careful that when the `cassandra_include_keyspaces` list is empty, then
+// no keyspace is restored.
+//
+// When the `cassandra_include_keyspaces` list is not defined, then all
+// keyspaces from the archive are to be restored, except those that could be
+// listed in `cassandra_exclude_keyspaces`.
+//
+// When the `cassandra_exclude_keyspaces` list is not defined, then a default
+// exlusion list is used, which excludes these standard system keyspaces:
+// "system", "system_auth", "system_distributed", "system_schema" and
+// "system_traces".
+//
+// Keyspaces are restored with their original names, as written into the
+// archive. This plugin doesn't support restoring any keyspace to another one
+// with a different name.
+//
+// Restore should happen on the same node where the data has been backuped.
+// This plugin doesn't support restoring keyspaces from one node to another
 // node.
+//
+// After restoring the data, a repair operation is highly recomended. This
+// plugin doesn't run any such repair for you.
 //
 // DEPENDENCIES
 //
 // This plugin relies on the `nodetool` and `sstableloader` utilities. Please
 // ensure that they are present on the cassandra node that will be backed up
-// or restored.
+// or restored. The `cassandra_bindir` configuration indicates in which
+// directory those two required utilities are to be found.
 
 package main
 
