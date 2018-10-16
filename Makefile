@@ -30,6 +30,9 @@ shield:
 shield-cli:
 	go $(BUILD_TYPE) ./cmd/shield
 
+cli-release:
+	go $(BUILD_TYPE) -ldflags="-X main.Version=${VERSION}" ./cmd/shield
+
 # Building Plugins
 plugin: plugins
 plugins:
