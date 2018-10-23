@@ -22,6 +22,7 @@
 //        "cassandra_password"          : "password",
 //        "cassandra_include_keyspaces" : [ "ksXXXX" ],       # optional
 //        "cassandra_exclude_keyspaces" : [ "ksXXXX" ],       # optional
+//        "cassandra_save_users"        : true,
 //        "cassandra_bindir"            : "/path/to/bindir",
 //        "cassandra_datadir"           : "/path/to/datadir",
 //        "cassandra_tar"               : "/path/to/tar"      # where is the tar utility?
@@ -38,6 +39,7 @@
 //        "cassandra_password"          : "cassandra",
 //        "cassandra_include_keyspaces" : null,               # Backup all keyspaces
 //        "cassandra_exclude_keyspaces" : [ "system_schema", "system_distributed", "system_auth", "system", "system_traces" ],
+//        "cassandra_save_users"        : true,
 //        "cassandra_bindir"            : "/var/vcap/packages/cassandra/bin",
 //        "cassandra_datadir"           : "/var/vcap/store/cassandra/data",
 //        "cassandra_tar"               : "tar"
@@ -61,6 +63,16 @@
 // excludes these standard system keyspaces: "system", "system_auth",
 // "system_distributed", "system_schema" and "system_traces".
 //
+// When 'cassandra_save_users' is true (its default value) then the content
+// the 'system_auth' keyspace tables are backuped. Four CSV files are backuped
+// for these tables: "roles", "role_permissions", "role_members",
+// "resource_role_permissons_index". This is useful to restore users and
+// permissions along with the keyspaces that are restored.
+//
+// The 'cassandra' user  is excluded from the 'system_auth.roles.csv' file.
+// This is useful not to alter the password of this user, and keep being able
+// to access the cluster for administrative tasks.
+//
 // RESTORE DETAILS
 //
 // Keyspaces are restored on a specific node. To completely restore the
@@ -83,7 +95,7 @@
 // listed in `cassandra_exclude_keyspaces`.
 //
 // When the `cassandra_exclude_keyspaces` list is not defined, then a default
-// exlusion list is used, which excludes these standard system keyspaces:
+// exclusion list is used, which excludes these standard system keyspaces:
 // "system", "system_auth", "system_distributed", "system_schema" and
 // "system_traces".
 //
@@ -95,15 +107,25 @@
 // This plugin doesn't support restoring keyspaces from one node to another
 // node.
 //
-// After restoring the data, a repair operation is highly recomended. This
-// plugin doesn't run any such repair for you.
+// When 'cassandra_save_users' is true (its default value) then the four CSV
+// files ("system_auth.roles.csv", "system_auth.role_permissions.csv",
+// "system_auth.role_members.csv", and
+// "system_auth.resource_role_permissons_index.csv") are loaded into the
+// 'system_auth' tables. This is useful to restore users and permissions along
+// with the keyspaces that are restored.
+//
+// The 'cassandra' user is supposed not to be included in the
+// 'system_auth.roles.csv' file. This is important in order not to alter the
+// password of this user, and keep being able to access the cluster for
+// administrative tasks.
 //
 // DEPENDENCIES
 //
-// This plugin relies on the `nodetool` and `sstableloader` utilities. Please
-// ensure that they are present on the cassandra node that will be backed up
-// or restored. The `cassandra_bindir` configuration indicates in which
-// directory those two required utilities are to be found.
+// This plugin relies on the `nodetool`, `sstableloader` and 'cqlsh'
+// utilities. Please ensure that they are present on the cassandra node that
+// will be backed up or restored. The `cassandra_bindir` configuration
+// indicates in which directory those three required utilities are to be
+// found.
 
 package main
 
@@ -121,13 +143,14 @@ import (
 
 // Default configuration values for the plugin
 const (
-	DefaultHost     = "127.0.0.1"
-	DefaultPort     = "9042"
-	DefaultUser     = "cassandra"
-	DefaultPassword = "cassandra"
-	DefaultBinDir   = "/var/vcap/jobs/cassandra/bin"
-	DefaultDataDir  = "/var/vcap/store/cassandra/data"
-	DefaultTar      = "tar"
+	DefaultHost      = "127.0.0.1"
+	DefaultPort      = "9042"
+	DefaultUser      = "cassandra"
+	DefaultPassword  = "cassandra"
+	DefaultSaveUsers = true
+	DefaultBinDir    = "/var/vcap/jobs/cassandra/bin"
+	DefaultDataDir   = "/var/vcap/store/cassandra/data"
+	DefaultTar       = "tar"
 
 	VcapOwnership = "vcap:vcap"
 	SnapshotName  = "shield-backup"
@@ -136,6 +159,7 @@ const (
 // Array or slices aren't immutable by nature; you can't make them constant
 var (
 	DefaultExcludeKeyspaces = []string{"system_schema", "system_distributed", "system_auth", "system", "system_traces"}
+	SystemAuthTables        = []string{"roles", "role_permissions", "role_members", "resource_role_permissons_index"}
 )
 
 func main() {
@@ -155,6 +179,7 @@ func main() {
   "cassandra_password"          : "password",
   "cassandra_include_keyspaces" : "db",
   "cassandra_exclude_keyspaces" : "system",
+  "cassandra_save_users"        : true,
   "cassandra_bindir"            : "/path/to/bin",   # optional
   "cassandra_datadir"           : "/path/to/data",  # optional
   "cassandra_tar"               : "/bin/tar"        # Tar-compatible archival tool to use
@@ -166,8 +191,9 @@ func main() {
   "cassandra_port"              : "9042",
   "cassandra_user"              : "cassandra",
   "cassandra_password"          : "cassandra",
-  "cassandra_exclude_keyspaces" : "system_schema system_distributed system_auth system system_traces",
-  "cassandra_bindir"            : "/var/vcap/packages/cassandra/bin",
+  "cassandra_exclude_keyspaces" : [ "system_schema", "system_distributed", "system_auth", "system", "system_traces" ],
+  "cassandra_save_users"        : true,
+  "cassandra_bindir"            : "/var/vcap/jobs/cassandra/bin",
   "cassandra_datadir"           : "/var/vcap/store/cassandra/data",
   "cassandra_tar"               : "tar"
 }
@@ -188,6 +214,7 @@ type CassandraInfo struct {
 	Password         string
 	IncludeKeyspaces []string
 	ExcludeKeyspaces []string
+	SaveUsers        bool
 	BinDir           string
 	DataDir          string
 	Tar              string
@@ -205,6 +232,7 @@ func (p CassandraPlugin) Validate(endpoint plugin.ShieldEndpoint) error {
 		s    string
 		err  error
 		fail bool
+		b    bool
 	)
 
 	s, err = endpoint.StringValueDefault("cassandra_host", "")
@@ -254,7 +282,7 @@ func (p CassandraPlugin) Validate(endpoint plugin.ShieldEndpoint) error {
 	} else if a == nil {
 		ansi.Printf("@G{\u2713 cassandra_include_keyspaces}      backing up *all* keyspaces\n")
 	} else {
-		ansi.Printf("@G{\u2713 cassandra_include_keyspaces}      [@C{%v}]\n", a)
+		ansi.Printf("@G{\u2713 cassandra_include_keyspaces}      @C{%v}\n", a)
 	}
 
 	a, err = endpoint.ArrayValueDefault("cassandra_exclude_keyspace", DefaultExcludeKeyspaces)
@@ -264,27 +292,35 @@ func (p CassandraPlugin) Validate(endpoint plugin.ShieldEndpoint) error {
 	} else if len(a) == 0 {
 		ansi.Printf("@G{\u2713 cassandra_exclude_keyspaces}      including *all* keyspaces\n")
 	} else {
-		ansi.Printf("@G{\u2713 cassandra_exclude_keyspaces}      [@C{%v}]\n", a)
+		ansi.Printf("@G{\u2713 cassandra_exclude_keyspaces}      @C{%v}\n", a)
+	}
+
+	b, err = endpoint.BooleanValueDefault("cassandra_save_users", DefaultSaveUsers)
+	if err != nil {
+		ansi.Printf("@R{\u2717 cassandra_save_users      %s}\n", err)
+		fail = true
+	} else {
+		ansi.Printf("@G{\u2713 cassandra_save_users}      @C{%t}\n", b)
 	}
 
 	s, err = endpoint.StringValueDefault("cassandra_bindir", "")
 	if err != nil {
-		ansi.Printf("@R{\u2717 cassandra_bindir        %s}\n", err)
+		ansi.Printf("@R{\u2717 cassandra_bindir          %s}\n", err)
 		fail = true
 	} else if s == "" {
-		ansi.Printf("@G{\u2713 cassandra_bindir}        using default @C{%s}\n", DefaultBinDir)
+		ansi.Printf("@G{\u2713 cassandra_bindir}          using default @C{%s}\n", DefaultBinDir)
 	} else {
-		ansi.Printf("@G{\u2713 cassandra_bindir}        @C{%s}\n", s)
+		ansi.Printf("@G{\u2713 cassandra_bindir}          @C{%s}\n", s)
 	}
 
 	s, err = endpoint.StringValueDefault("cassandra_datadir", "")
 	if err != nil {
-		ansi.Printf("@R{\u2717 cassandra_datadir       %s}\n", err)
+		ansi.Printf("@R{\u2717 cassandra_datadir         %s}\n", err)
 		fail = true
 	} else if s == "" {
-		ansi.Printf("@G{\u2713 cassandra_datadir}       using default @C{%s}\n", DefaultDataDir)
+		ansi.Printf("@G{\u2713 cassandra_datadir}         using default @C{%s}\n", DefaultDataDir)
 	} else {
-		ansi.Printf("@G{\u2713 cassandra_datadir}       @C{%s}\n", s)
+		ansi.Printf("@G{\u2713 cassandra_datadir}         @C{%s}\n", s)
 	}
 
 	s, err = endpoint.StringValueDefault("cassandra_tar", "")
@@ -464,6 +500,21 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 		}
 	}
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Recursive hard-link snapshot files in temp dir}\n")
+
+	if cassandra.SaveUsers {
+		for _, table := range SystemAuthTables {
+			plugin.DEBUG("Saving cassandra %s", table)
+			cmd = fmt.Sprintf("%s/cqlsh -u \"%s\" -p \"%s\" -e \"COPY system_auth.%s TO '%s/system_auth.%s.csv' WITH HEADER=true;\" \"%s\"",
+				cassandra.BinDir, cassandra.User, cassandra.Password, table, baseDir, table, cassandra.Host)
+			plugin.DEBUG("Executing `%s`", cmd)
+			err = plugin.Exec(cmd, plugin.NOPIPE)
+			if err != nil {
+				ansi.Fprintf(os.Stderr, "@R{\u2717 Saving cassandra %s}\n", table)
+				return err
+			}
+			ansi.Fprintf(os.Stderr, "@G{\u2713 Saving cassandra %s}\n", table)
+		}
+	}
 
 	plugin.DEBUG("Setting ownership of all backup files to '%s'", VcapOwnership)
 	cmd = fmt.Sprintf("chown -R vcap:vcap \"%s\"", baseDir)
@@ -664,6 +715,15 @@ func (p CassandraPlugin) Restore(endpoint plugin.ShieldEndpoint) error {
 	}
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Load tables data}\n")
 
+	if cassandra.SaveUsers {
+		err = restoreUsers(cassandra, baseDir)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Restore users}\n")
+			return err
+		}
+		ansi.Fprintf(os.Stderr, "@G{\u2713 Restore users}\n")
+	}
+
 	return nil
 }
 
@@ -692,6 +752,33 @@ func restoreKeyspace(cassandra *CassandraInfo, keyspaceDirPath string) error {
 			return err
 		}
 	}
+	return nil
+}
+
+func restoreUsers(cassandra *CassandraInfo, baseDir string) error {
+	for _, table := range SystemAuthTables {
+		plugin.DEBUG("Restoring 'system_auth.%s' table content", table)
+		cmd := fmt.Sprintf("%s/cqlsh -u \"%s\" -p \"%s\" -e \"COPY system_auth.%s FROM '%s/system_auth.%s.csv' WITH HEADER=true;\" \"%s\"",
+			cassandra.BinDir, cassandra.User, cassandra.Password, table, baseDir, table, cassandra.Host)
+		plugin.DEBUG("Executing: `%s`", cmd)
+		err := plugin.Exec(cmd, plugin.STDIN)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Restore 'system_auth.%s' table content}\n", table)
+			return err
+		}
+		ansi.Fprintf(os.Stderr, "@G{\u2713 Restore 'system_auth.%s' table content}\n", table)
+	}
+
+	plugin.DEBUG("Removing cassandra user from 'system_auth.roles' table content")
+	cmd := fmt.Sprintf("sed -i -e '/^cassandra,/d' \"%s/system_auth.roles.csv\"", baseDir)
+	plugin.DEBUG("Executing: `%s`", cmd)
+	err := plugin.Exec(cmd, plugin.STDIN)
+	if err != nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Remove cassandra user from 'system_auth.roles' table content}\n")
+		return err
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Remove cassandra user from 'system_auth.roles' table content}\n")
+
 	return nil
 }
 
@@ -747,6 +834,12 @@ func cassandraInfo(endpoint plugin.ShieldEndpoint) (*CassandraInfo, error) {
 	}
 	plugin.DEBUG("CASSANDRA_EXCLUDE_KEYSPACES: [%v]", excludeKeyspace)
 
+	saveUsers, err := endpoint.BooleanValueDefault("cassandra_save_users", DefaultSaveUsers)
+	if err != nil {
+		return nil, err
+	}
+	plugin.DEBUG("CASSANDRA_SAVE_USERS: %t", saveUsers)
+
 	bindir, err := endpoint.StringValueDefault("cassandra_bindir", DefaultBinDir)
 	if err != nil {
 		return nil, err
@@ -772,6 +865,7 @@ func cassandraInfo(endpoint plugin.ShieldEndpoint) (*CassandraInfo, error) {
 		Password:         password,
 		IncludeKeyspaces: includeKeyspace,
 		ExcludeKeyspaces: excludeKeyspace,
+		SaveUsers:        saveUsers,
 		BinDir:           bindir,
 		DataDir:          datadir,
 		Tar:              tar,
