@@ -22,9 +22,9 @@
 //        "cassandra_password"          : "password",
 //        "cassandra_include_keyspaces" : [ "ksXXXX" ],       # optional
 //        "cassandra_exclude_keyspaces" : [ "ksXXXX" ],       # optional
-//        "cassandra_save_users"        : true,
+//        "cassandra_save_users"        : true,               # optional
 //        "cassandra_bindir"            : "/path/to/bindir",
-//        "cassandra_datadir"           : "/path/to/datadir",
+//        "cassandra_datadir"           : "/var/vcap/store/cassandra/<cluster-name>/data",
 //        "cassandra_tar"               : "/path/to/tar"      # where is the tar utility?
 //    }
 //
