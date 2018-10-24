@@ -502,18 +502,12 @@ func (p CassandraPlugin) Backup(endpoint plugin.ShieldEndpoint) error {
 	ansi.Fprintf(os.Stderr, "@G{\u2713 Recursive hard-link snapshot files in temp dir}\n")
 
 	if cassandra.SaveUsers {
-		for _, table := range SystemAuthTables {
-			plugin.DEBUG("Saving cassandra %s", table)
-			cmd = fmt.Sprintf("%s/cqlsh -u \"%s\" -p \"%s\" -e \"COPY system_auth.%s TO '%s/system_auth.%s.csv' WITH HEADER=true;\" \"%s\"",
-				cassandra.BinDir, cassandra.User, cassandra.Password, table, baseDir, table, cassandra.Host)
-			plugin.DEBUG("Executing `%s`", cmd)
-			err = plugin.Exec(cmd, plugin.NOPIPE)
-			if err != nil {
-				ansi.Fprintf(os.Stderr, "@R{\u2717 Saving cassandra %s}\n", table)
-				return err
-			}
-			ansi.Fprintf(os.Stderr, "@G{\u2713 Saving cassandra %s}\n", table)
+		err = backupUsers(cassandra, baseDir)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Backup users}\n")
+			return err
 		}
+		ansi.Fprintf(os.Stderr, "@G{\u2713 Backup users}\n")
 	}
 
 	plugin.DEBUG("Setting ownership of all backup files to '%s'", VcapOwnership)
@@ -619,6 +613,22 @@ func hardLinkAll(srcDir string, dstDir string) (err error) {
 		if err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func backupUsers(cassandra *CassandraInfo, baseDir string) error {
+	for _, table := range SystemAuthTables {
+		plugin.DEBUG("Saving cassandra %s", table)
+		cmd := fmt.Sprintf("%s/cqlsh -u \"%s\" -p \"%s\" -e \"COPY system_auth.%s TO '%s/system_auth.%s.csv' WITH HEADER=true;\" \"%s\"",
+			cassandra.BinDir, cassandra.User, cassandra.Password, table, baseDir, table, cassandra.Host)
+		plugin.DEBUG("Executing `%s`", cmd)
+		err := plugin.Exec(cmd, plugin.NOPIPE)
+		if err != nil {
+			ansi.Fprintf(os.Stderr, "@R{\u2717 Saving cassandra %s}\n", table)
+			return err
+		}
+		ansi.Fprintf(os.Stderr, "@G{\u2713 Saving cassandra %s}\n", table)
 	}
 	return nil
 }
@@ -756,6 +766,16 @@ func restoreKeyspace(cassandra *CassandraInfo, keyspaceDirPath string) error {
 }
 
 func restoreUsers(cassandra *CassandraInfo, baseDir string) error {
+	plugin.DEBUG("Excluding cassandra user from 'system_auth.roles' table content")
+	cmd := fmt.Sprintf("sed -i -e '/^cassandra,/d' \"%s/system_auth.roles.csv\"", baseDir)
+	plugin.DEBUG("Executing: `%s`", cmd)
+	err := plugin.Exec(cmd, plugin.STDIN)
+	if err != nil {
+		ansi.Fprintf(os.Stderr, "@R{\u2717 Exclude cassandra user from 'system_auth.roles' table content}\n")
+		return err
+	}
+	ansi.Fprintf(os.Stderr, "@G{\u2713 Exclude cassandra user from 'system_auth.roles' table content}\n")
+
 	for _, table := range SystemAuthTables {
 		plugin.DEBUG("Restoring 'system_auth.%s' table content", table)
 		cmd := fmt.Sprintf("%s/cqlsh -u \"%s\" -p \"%s\" -e \"COPY system_auth.%s FROM '%s/system_auth.%s.csv' WITH HEADER=true;\" \"%s\"",
@@ -768,17 +788,6 @@ func restoreUsers(cassandra *CassandraInfo, baseDir string) error {
 		}
 		ansi.Fprintf(os.Stderr, "@G{\u2713 Restore 'system_auth.%s' table content}\n", table)
 	}
-
-	plugin.DEBUG("Removing cassandra user from 'system_auth.roles' table content")
-	cmd := fmt.Sprintf("sed -i -e '/^cassandra,/d' \"%s/system_auth.roles.csv\"", baseDir)
-	plugin.DEBUG("Executing: `%s`", cmd)
-	err := plugin.Exec(cmd, plugin.STDIN)
-	if err != nil {
-		ansi.Fprintf(os.Stderr, "@R{\u2717 Remove cassandra user from 'system_auth.roles' table content}\n")
-		return err
-	}
-	ansi.Fprintf(os.Stderr, "@G{\u2713 Remove cassandra user from 'system_auth.roles' table content}\n")
-
 	return nil
 }
 
