@@ -177,8 +177,8 @@ func main() {
   "cassandra_port"              : "9042",           # optional
   "cassandra_user"              : "username",
   "cassandra_password"          : "password",
-  "cassandra_include_keyspaces" : "db",
-  "cassandra_exclude_keyspaces" : "system",
+  "cassandra_include_keyspaces" : ["db"],
+  "cassandra_exclude_keyspaces" : ["system"],
   "cassandra_save_users"        : true,
   "cassandra_bindir"            : "/path/to/bin",   # optional
   "cassandra_datadir"           : "/path/to/data",  # optional
